@@ -3,6 +3,9 @@ import toast from "react-hot-toast";
 import { axiosInstance } from "../lib/axios";
 import { useAuthStore } from "./useAuthStore";
 
+const getErrorMessage = (error) =>
+  error.response?.data?.message || "Unable to connect to the server";
+
 export const useChatStore = create((set, get) => ({
   messages: [],
   users: [],
@@ -16,7 +19,7 @@ export const useChatStore = create((set, get) => ({
       const res = await axiosInstance.get("/messages/users");
       set({ users: res.data });
     } catch (error) {
-      toast.error(error.response.data.message);
+      toast.error(getErrorMessage(error));
     } finally {
       set({ isUsersLoading: false });
     }
@@ -28,7 +31,7 @@ export const useChatStore = create((set, get) => ({
       const res = await axiosInstance.get(`/messages/${userId}`);
       set({ messages: res.data });
     } catch (error) {
-      toast.error(error.response.data.message);
+      toast.error(getErrorMessage(error));
     } finally {
       set({ isMessagesLoading: false });
     }
@@ -39,7 +42,8 @@ export const useChatStore = create((set, get) => ({
       const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, messageData);
       set({ messages: [...messages, res.data] });
     } catch (error) {
-      toast.error(error.response.data.message);
+      toast.error(getErrorMessage(error));
+      throw error;
     }
   },
 
@@ -48,7 +52,9 @@ export const useChatStore = create((set, get) => ({
     if (!selectedUser) return;
 
     const socket = useAuthStore.getState().socket;
+    if (!socket) return;
 
+    socket.off("newMessage");
     socket.on("newMessage", (newMessage) => {
       const isMessageSentFromSelectedUser = newMessage.senderId === selectedUser._id;
       if (!isMessageSentFromSelectedUser) return;
@@ -61,7 +67,7 @@ export const useChatStore = create((set, get) => ({
 
   unsubscribeFromMessages: () => {
     const socket = useAuthStore.getState().socket;
-    socket.off("newMessage");
+    socket?.off("newMessage");
   },
 
   setSelectedUser: (selectedUser) => set({ selectedUser }),
