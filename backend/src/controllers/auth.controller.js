@@ -37,6 +37,7 @@ export const signup = async (req, res) => {
             fullName: newUser.fullName,
             email: newUser.email,
             profilePic: newUser.profilePic,
+            createdAt: newUser.createdAt,
         });
     } else {
         res.status(400).json({ message: "Invalid user data" });
@@ -68,6 +69,7 @@ export const login = async (req, res) => {
         fullName: user.fullName,
         email: user.email,
         profilePic: user.profilePic,
+        createdAt: user.createdAt,
     });
   } catch (error) {
     console.log("Error in login controller:", error.message);
@@ -94,12 +96,12 @@ export const updateProfile = async (req, res) => {
       return res.status(400).json({ message: "Profile picture is required" });
     }
 
-    const uploadResponse = await cloudinary.uploader.upload(profilePic)
-    const updateUser = await User.findByIdAndUpdate(
+    const uploadResponse = await cloudinary.uploader.upload(profilePic);
+    const updatedUser = await User.findByIdAndUpdate(
       userId,
-       {profilePic:uploaadResponse.secure_url}, 
-       {new:true}
-      );
+      { profilePic: uploadResponse.secure_url },
+      { new: true }
+    ).select("-password");
 
     res.status(200).json(updatedUser);
   } catch (error) {
