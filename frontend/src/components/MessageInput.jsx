@@ -42,9 +42,12 @@ const MessageInput = () => {
     if (!text.trim() && !attachment) return;
 
     try {
+      const isImageAttachment = attachment?.type?.startsWith("image/");
+
       await sendMessage({
         text: text.trim(),
-        attachment,
+        image: isImageAttachment ? attachment.data : undefined,
+        attachment: isImageAttachment ? null : attachment,
       });
 
       // Clear form
@@ -103,9 +106,11 @@ const MessageInput = () => {
 
           <button
             type="button"
-            className={`hidden sm:flex btn btn-circle
+            className={`btn btn-circle shrink-0
                      ${attachment ? "text-emerald-500" : "text-zinc-400"}`}
             onClick={() => fileInputRef.current?.click()}
+            aria-label="Attach file"
+            title="Attach file"
           >
             <Paperclip size={20} />
           </button>
