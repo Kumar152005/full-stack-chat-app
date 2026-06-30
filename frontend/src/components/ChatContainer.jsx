@@ -7,6 +7,7 @@ import MessageSkeleton from "./skeletons/MessageSkeleton";
 import { useAuthStore } from "../store/useAuthStore";
 import { formatMessageTime } from "../lib/utils";
 import { FileText } from "lucide-react";
+import { normalizeImageUrl, useImageFallback } from "../lib/image";
 
 const ChatContainer = () => {
   const {
@@ -60,10 +61,11 @@ const ChatContainer = () => {
                 <img
                   src={
                     message.senderId === authUser._id
-                      ? authUser.profilePic || "/avatar.png"
-                      : selectedUser.profilePic || "/avatar.png"
+                      ? normalizeImageUrl(authUser.profilePic)
+                      : normalizeImageUrl(selectedUser.profilePic)
                   }
                   alt="profile pic"
+                  onError={useImageFallback}
                 />
               </div>
             </div>
@@ -75,9 +77,10 @@ const ChatContainer = () => {
             <div className="chat-bubble flex flex-col">
               {message.image && (
                 <img
-                  src={message.image}
+                  src={normalizeImageUrl(message.image, "")}
                   alt="Attachment"
-                  className="sm:max-w-[200px] rounded-md mb-2"
+                  className="max-w-[240px] sm:max-w-[320px] rounded-md mb-2 object-contain"
+                  onError={useImageFallback}
                 />
               )}
               {message.attachment?.url && !message.attachment?.type?.startsWith("image/") && (
