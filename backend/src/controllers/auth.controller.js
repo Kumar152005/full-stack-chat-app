@@ -3,6 +3,14 @@ import User from "../models/user.model.js";
 import bcrypt from "bcryptjs";
 import cloudinary from "../lib/cloudinary.js";
 
+const getBrowserSafeImageUrl = (uploadResponse) =>
+  cloudinary.url(uploadResponse.public_id, {
+    secure: true,
+    resource_type: "image",
+    format: "jpg",
+    transformation: [{ quality: "auto" }],
+  });
+
 export const signup = async (req, res) => {
     const { fullName, email, password } = req.body
   try {
@@ -96,10 +104,10 @@ export const updateProfile = async (req, res) => {
       return res.status(400).json({ message: "Profile picture is required" });
     }
 
-    const uploadResponse = await cloudinary.uploader.upload(profilePic);
+    const uploadResponse = await cloudinary.uploader.upload(profilePic, { resource_type: "image" });
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      { profilePic: uploadResponse.secure_url },
+      { profilePic: getBrowserSafeImageUrl(uploadResponse) },
       { new: true }
     ).select("-password");
 
