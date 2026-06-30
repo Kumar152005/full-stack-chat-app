@@ -1,5 +1,5 @@
 import { useChatStore } from "../store/useChatStore";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import ChatHeader from "./ChatHeader";
 import MessageInput from "./MessageInput";
@@ -7,7 +7,39 @@ import MessageSkeleton from "./skeletons/MessageSkeleton";
 import { useAuthStore } from "../store/useAuthStore";
 import { formatMessageTime } from "../lib/utils";
 import { FileText } from "lucide-react";
-import { normalizeImageUrl, useImageFallback } from "../lib/image";
+import { normalizeImageUrl, normalizeMessageImageUrl, useImageFallback } from "../lib/image";
+
+const MessageImage = ({ src }) => {
+  const [hasError, setHasError] = useState(false);
+  const imageUrl = normalizeMessageImageUrl(src);
+
+  if (!imageUrl) return null;
+
+  if (hasError) {
+    return (
+      <a
+        href={imageUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="flex items-center gap-2 rounded-lg bg-base-200 p-3 mb-2 hover:bg-base-300"
+      >
+        <FileText className="size-5 shrink-0" />
+        <span className="max-w-48 truncate">Open image</span>
+      </a>
+    );
+  }
+
+  return (
+    <a href={imageUrl} target="_blank" rel="noreferrer">
+      <img
+        src={imageUrl}
+        alt="Attachment"
+        className="w-full max-w-[240px] sm:max-w-[320px] rounded-md mb-2 object-contain"
+        onError={() => setHasError(true)}
+      />
+    </a>
+  );
+};
 
 const ChatContainer = () => {
   const {
@@ -75,14 +107,7 @@ const ChatContainer = () => {
               </time>
             </div>
             <div className="chat-bubble flex flex-col">
-              {message.image && (
-                <img
-                  src={normalizeImageUrl(message.image, "")}
-                  alt="Attachment"
-                  className="max-w-[240px] sm:max-w-[320px] rounded-md mb-2 object-contain"
-                  onError={useImageFallback}
-                />
-              )}
+              {message.image && <MessageImage src={message.image} />}
               {message.attachment?.url && !message.attachment?.type?.startsWith("image/") && (
                 <a
                   href={message.attachment.url}
