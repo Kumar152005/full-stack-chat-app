@@ -3,6 +3,7 @@ import { useChatStore } from "../store/useChatStore";
 import { useAuthStore } from "../store/useAuthStore";
 import SidebarSkeleton from "./skeletons/SidebarSkeleton";
 import { Users } from "lucide-react";
+import { normalizeImageUrl, useImageFallback } from "../lib/image";
 
 const Sidebar = () => {
   const { getUsers, users, selectedUser, setSelectedUser, isUsersLoading } = useChatStore();
@@ -55,9 +56,10 @@ const Sidebar = () => {
           >
             <div className="relative mx-auto lg:mx-0">
               <img
-                src={user.profilePic || "/avatar.png"}
-                alt={user.name}
+                src={normalizeImageUrl(user.profilePic)}
+                alt={user.fullName}
                 className="size-12 object-cover rounded-full"
+                onError={useImageFallback}
               />
               {onlineUsers.includes(user._id) && (
                 <span
