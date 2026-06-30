@@ -6,6 +6,7 @@ import MessageInput from "./MessageInput";
 import MessageSkeleton from "./skeletons/MessageSkeleton";
 import { useAuthStore } from "../store/useAuthStore";
 import { formatMessageTime } from "../lib/utils";
+import { FileText } from "lucide-react";
 
 const ChatContainer = () => {
   const {
@@ -16,7 +17,7 @@ const ChatContainer = () => {
     subscribeToMessages,
     unsubscribeFromMessages,
   } = useChatStore();
-  const { authUser } = useAuthStore();
+  const { authUser, socket } = useAuthStore();
   const messageEndRef = useRef(null);
 
   useEffect(() => {
@@ -25,7 +26,7 @@ const ChatContainer = () => {
     subscribeToMessages();
 
     return () => unsubscribeFromMessages();
-  }, [selectedUser._id, getMessages, subscribeToMessages, unsubscribeFromMessages]);
+  }, [selectedUser._id, socket, getMessages, subscribeToMessages, unsubscribeFromMessages]);
 
   useEffect(() => {
     if (messageEndRef.current && messages) {
@@ -78,6 +79,17 @@ const ChatContainer = () => {
                   alt="Attachment"
                   className="sm:max-w-[200px] rounded-md mb-2"
                 />
+              )}
+              {message.attachment?.url && !message.attachment?.type?.startsWith("image/") && (
+                <a
+                  href={message.attachment.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-2 rounded-lg bg-base-200 p-3 mb-2 hover:bg-base-300"
+                >
+                  <FileText className="size-5 shrink-0" />
+                  <span className="max-w-48 truncate">{message.attachment.name || "Attachment"}</span>
+                </a>
               )}
               {message.text && <p>{message.text}</p>}
             </div>
