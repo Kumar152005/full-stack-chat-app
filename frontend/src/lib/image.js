@@ -6,6 +6,20 @@ export const normalizeImageUrl = (url, fallback = DEFAULT_AVATAR) => {
   return url.startsWith("http://") ? url.replace("http://", "https://") : url;
 };
 
+export const normalizeMessageImageUrl = (url) => {
+  const normalizedUrl = normalizeImageUrl(url, "");
+
+  if (
+    normalizedUrl.includes("res.cloudinary.com") &&
+    normalizedUrl.includes("/image/upload/") &&
+    !normalizedUrl.includes("/image/upload/f_jpg,q_auto/")
+  ) {
+    return normalizedUrl.replace("/image/upload/", "/image/upload/f_jpg,q_auto/");
+  }
+
+  return normalizedUrl;
+};
+
 export const useImageFallback = (event, fallback = DEFAULT_AVATAR) => {
   if (event.currentTarget.src !== fallback) {
     event.currentTarget.src = fallback;
