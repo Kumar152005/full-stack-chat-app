@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAuthStore } from "../store/useAuthStore";
 import { Camera, Mail, User } from "lucide-react";
+import { normalizeImageUrl, useImageFallback } from "../lib/image";
 
 const ProfilePage = () => {
   const { authUser, isUpdatingProfile, updateProfile } = useAuthStore();
@@ -35,9 +36,10 @@ const ProfilePage = () => {
           <div className="flex flex-col items-center gap-4">
             <div className="relative">
               <img
-                src={selectedImg || authUser.profilePic || "/avatar.png"}
+                src={selectedImg || normalizeImageUrl(authUser.profilePic)}
                 alt="Profile"
                 className="size-32 rounded-full object-cover border-4 "
+                onError={useImageFallback}
               />
               <label
                 htmlFor="avatar-upload"
