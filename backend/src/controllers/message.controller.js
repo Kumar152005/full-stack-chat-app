@@ -37,15 +37,32 @@ export const getMessages = async(req,res) => {
 
 export const sendMessage = async (req, res) => {
     try {
-        const { text, image } = req.body;
+        const { text, image, attachment } = req.body;
         const { id: receiverId } =  req.params;
         const senderId =req.user._id;
 
         let imageUrl;
+        let attachmentData;
         if (image) {
             //upload base64 image to cloudinary
-            const uploadResponse = await cloudinary.uploader.upload(image);
+            const uploadResponse = await cloudinary.uploader.upload(image, { resource_type: "auto" });
             imageUrl = uploadResponse.secure_url;
+        }
+        if (attachment?.data) {
+            const uploadResponse = await cloudinary.uploader.upload(attachment.data, {
+                resource_type: "auto",
+            });
+
+            attachmentData = {
+                url: uploadResponse.secure_url,
+                name: attachment.name,
+                type: attachment.type,
+                size: attachment.size,
+            };
+
+            if (attachment.type?.startsWith("image/")) {
+                imageUrl = uploadResponse.secure_url;
+            }
         }
 
         const newMessage = new Message({
@@ -53,6 +70,7 @@ export const sendMessage = async (req, res) => {
             receiverId,
             text,
             image: imageUrl,
+            attachment: attachmentData,
         });
 
         await newMessage.save();
