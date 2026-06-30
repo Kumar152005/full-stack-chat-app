@@ -4,6 +4,14 @@ import Message from "../models/message.model.js";
 import cloudinary from "../lib/cloudinary.js";
 import { getReceiverSocketId, io } from "../lib/socket.js";
 
+const getBrowserSafeImageUrl = (uploadResponse) =>
+    cloudinary.url(uploadResponse.public_id, {
+        secure: true,
+        resource_type: "image",
+        format: "jpg",
+        transformation: [{ quality: "auto" }],
+    });
+
 export const getUserForSidebar = async (req, res) => {
     try {
         const loggedInUserId = req.user._id;
@@ -45,8 +53,8 @@ export const sendMessage = async (req, res) => {
         let attachmentData;
         if (image) {
             //upload base64 image to cloudinary
-            const uploadResponse = await cloudinary.uploader.upload(image, { resource_type: "auto" });
-            imageUrl = uploadResponse.secure_url;
+            const uploadResponse = await cloudinary.uploader.upload(image, { resource_type: "image" });
+            imageUrl = getBrowserSafeImageUrl(uploadResponse);
         }
         if (attachment?.data) {
             const uploadResponse = await cloudinary.uploader.upload(attachment.data, {
@@ -61,7 +69,7 @@ export const sendMessage = async (req, res) => {
             };
 
             if (attachment.type?.startsWith("image/")) {
-                imageUrl = uploadResponse.secure_url;
+                imageUrl = getBrowserSafeImageUrl(uploadResponse);
             }
         }
 
