@@ -2,7 +2,7 @@ import User from "../models/user.model.js";
 import Message from "../models/message.model.js";
 
 import cloudinary from "../lib/cloudinary.js";
-import { getReceiverSocketId, io } from "../lib/socket.js";
+import { getReceiverSocketIds, io } from "../lib/socket.js";
 
 const getBrowserSafeImageUrl = (uploadResponse) =>
     cloudinary.url(uploadResponse.public_id, {
@@ -83,9 +83,9 @@ export const sendMessage = async (req, res) => {
 
         await newMessage.save();
 
-         const receiverSocketId = getReceiverSocketId(receiverId);
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("newMessage", newMessage);
+         const receiverSocketIds = getReceiverSocketIds(receiverId);
+    if (receiverSocketIds.length > 0) {
+      io.to(receiverSocketIds).emit("newMessage", newMessage);
     }
     
         res.status(201).json(newMessage);
