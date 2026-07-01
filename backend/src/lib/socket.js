@@ -25,6 +25,15 @@ export function getReceiverSocketIds(userId) {
   return Array.from(userSocketMap[userId] || []);
 }
 
+const emitToUser = (userId, event, payload) => {
+  const socketIds = getReceiverSocketIds(userId);
+
+  if (socketIds.length === 0) return false;
+
+  io.to(socketIds).emit(event, payload);
+  return true;
+};
+
 // used to store online users
 const userSocketMap = {}; // {userId: Set<socketId>}
 
@@ -39,6 +48,39 @@ io.on("connection", (socket) => {
 
   // io.emit() is used to send events to all the connected clients
   io.emit("getOnlineUsers", Object.keys(userSocketMap));
+
+  socket.on("call:offer", ({ to, from, caller, type, offer }) => {
+    const delivered = emitToUser(to, "call:offer", {
+      from,
+      caller,
+      type,
+      offer,
+    });
+
+    if (!delivered) {
+      socket.emit("call:unavailable", { to });
+    }
+  });
+
+  socket.on("call:answer", ({ to, from, answer }) => {
+    emitToUser(to, "call:answer", { from, answer });
+  });
+
+  socket.on("call:ice-candidate", ({ to, from, candidate }) => {
+    emitToUser(to, "call:ice-candidate", { from, candidate });
+  });
+
+  socket.on("call:reject", ({ to, from }) => {
+    emitToUser(to, "call:reject", { from });
+  });
+
+  socket.on("call:busy", ({ to, from }) => {
+    emitToUser(to, "call:busy", { from });
+  });
+
+  socket.on("call:end", ({ to, from }) => {
+    emitToUser(to, "call:end", { from });
+  });
 
   socket.on("disconnect", () => {
     console.log("A user disconnected", socket.id);
