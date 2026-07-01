@@ -1,4 +1,5 @@
 import Navbar from "./components/Navbar";
+import CallModal from "./components/CallModal";
 
 import HomePage from "./pages/HomePage";
 import SignUpPage from "./pages/SignUpPage";
@@ -44,6 +45,7 @@ const App = () => {
         <Route path="/profile" element={authUser ? <ProfilePage /> : <Navigate to="/login" />} />
       </Routes>
 
+      <CallModal />
       <Toaster />
     </div>
   );
