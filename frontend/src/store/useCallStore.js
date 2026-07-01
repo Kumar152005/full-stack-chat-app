@@ -7,11 +7,16 @@ const iceServers = [
   { urls: "stun:stun1.l.google.com:19302" },
 ];
 
-const getMediaStream = (type) =>
-  navigator.mediaDevices.getUserMedia({
+const getMediaStream = (type) => {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("MEDIA_DEVICES_UNAVAILABLE");
+  }
+
+  return navigator.mediaDevices.getUserMedia({
     audio: true,
     video: type === "video",
   });
+};
 
 const stopStream = (stream) => {
   stream?.getTracks().forEach((track) => track.stop());
@@ -70,7 +75,7 @@ export const useCallStore = create((set, get) => ({
     };
 
     peerConnection.onconnectionstatechange = () => {
-      if (["failed", "disconnected", "closed"].includes(peerConnection.connectionState)) {
+      if (["failed", "closed"].includes(peerConnection.connectionState)) {
         get().cleanupCall();
       }
     };
@@ -100,6 +105,12 @@ export const useCallStore = create((set, get) => ({
       return;
     }
 
+    set({
+      callStatus: "calling",
+      callType: type,
+      peerUser: receiver,
+    });
+
     try {
       const localStream = await getMediaStream(type);
       const peerConnection = get().createPeerConnection(receiver._id);
@@ -109,12 +120,7 @@ export const useCallStore = create((set, get) => ({
       const offer = await peerConnection.createOffer();
       await peerConnection.setLocalDescription(offer);
 
-      set({
-        callStatus: "calling",
-        callType: type,
-        peerUser: receiver,
-        localStream,
-      });
+      set({ localStream });
 
       socket.emit("call:offer", {
         to: receiver._id,
@@ -129,7 +135,11 @@ export const useCallStore = create((set, get) => ({
       });
     } catch (error) {
       console.error("Error starting call:", error);
-      toast.error("Unable to start call. Please allow microphone/camera access.");
+      toast.error(
+        error.message === "MEDIA_DEVICES_UNAVAILABLE"
+          ? "This browser does not support voice/video calls."
+          : "Unable to start call. Please allow microphone/camera access."
+      );
       get().cleanupCall();
     }
   },
@@ -141,6 +151,7 @@ export const useCallStore = create((set, get) => ({
     if (!socket || !authUser || !incomingOffer || !peerUser) return;
 
     try {
+      set({ callStatus: "connecting" });
       const localStream = await getMediaStream(callType);
       const peerConnection = get().createPeerConnection(peerUser._id);
 
@@ -164,7 +175,11 @@ export const useCallStore = create((set, get) => ({
       });
     } catch (error) {
       console.error("Error accepting call:", error);
-      toast.error("Unable to answer call. Please allow microphone/camera access.");
+      toast.error(
+        error.message === "MEDIA_DEVICES_UNAVAILABLE"
+          ? "This browser does not support voice/video calls."
+          : "Unable to answer call. Please allow microphone/camera access."
+      );
       get().endCall();
     }
   },
