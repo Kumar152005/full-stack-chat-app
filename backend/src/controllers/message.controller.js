@@ -15,12 +15,72 @@ const getBrowserSafeImageUrl = (uploadResponse) =>
 export const getUserForSidebar = async (req, res) => {
     try {
         const loggedInUserId = req.user._id;
-        const filteredUsers = await User.find({ _id: {$ne: loggedInUserId } }).select("-password");
+        const friendIds = req.user.friends || [];
+        const filteredUsers = await User.find({
+            _id: { $in: friendIds, $ne: loggedInUserId },
+        }).select("-password");
         
         res.status(200).json(filteredUsers);
     } catch (error) {
         console.error("Error in getUserForSidebar: ", error.message);
         res.status(500).json({ error: "Internal server error" });
+    }
+};
+
+export const searchUserByEmail = async (req, res) => {
+    try {
+        const loggedInUserId = req.user._id;
+        const email = req.query.email?.trim();
+
+        if (!email) {
+            return res.status(400).json({ message: "Email is required" });
+        }
+
+        const escapedEmail = email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const user = await User.findOne({
+            email: { $regex: `^${escapedEmail}$`, $options: "i" },
+            _id: { $ne: loggedInUserId },
+        }).select("-password");
+
+        if (!user) {
+            return res.status(404).json({ message: "No account found with this email" });
+        }
+
+        res.status(200).json({
+            ...user.toObject(),
+            isFriend: (req.user.friends || []).some((friendId) => friendId.toString() === user._id.toString()),
+        });
+    } catch (error) {
+        console.error("Error in searchUserByEmail: ", error.message);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+export const addFriend = async (req, res) => {
+    try {
+        const loggedInUserId = req.user._id;
+        const { id: friendId } = req.params;
+
+        if (loggedInUserId.toString() === friendId) {
+            return res.status(400).json({ message: "You cannot add yourself" });
+        }
+
+        const friend = await User.findById(friendId).select("-password");
+        if (!friend) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        await User.findByIdAndUpdate(loggedInUserId, {
+            $addToSet: { friends: friendId },
+        });
+        await User.findByIdAndUpdate(friendId, {
+            $addToSet: { friends: loggedInUserId },
+        });
+
+        res.status(200).json(friend);
+    } catch (error) {
+        console.error("Error in addFriend: ", error.message);
+        res.status(500).json({ message: "Internal server error" });
     }
 };
 
