@@ -24,6 +24,24 @@ const messageSchema = new mongoose.Schema(
             type: String,
             size: Number,
         },
+        status: {
+            type: String,
+            enum: ["sent", "delivered", "seen"],
+            default: "sent",
+        },
+        reactions: [
+            {
+                userId: {
+                    type: mongoose.Schema.Types.ObjectId,
+                    ref: "User",
+                },
+                emoji: String,
+            },
+        ],
+        deletedForEveryone: {
+            type: Boolean,
+            default: false,
+        },
     },
     { timestamps: true }
 );
