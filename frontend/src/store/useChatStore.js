@@ -10,8 +10,11 @@ export const useChatStore = create((set, get) => ({
   messages: [],
   users: [],
   selectedUser: null,
+  searchedUser: null,
   isUsersLoading: false,
   isMessagesLoading: false,
+  isSearchingUser: false,
+  isAddingFriend: false,
 
   getUsers: async () => {
     set({ isUsersLoading: true });
@@ -36,6 +39,50 @@ export const useChatStore = create((set, get) => ({
       set({ isMessagesLoading: false });
     }
   },
+
+  searchUserByEmail: async (email) => {
+    const normalizedEmail = email.trim();
+    if (!normalizedEmail) {
+      toast.error("Enter an email address");
+      return;
+    }
+
+    set({ isSearchingUser: true, searchedUser: null });
+    try {
+      const res = await axiosInstance.get("/messages/users/search", {
+        params: { email: normalizedEmail },
+      });
+      set({ searchedUser: res.data });
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      set({ isSearchingUser: false });
+    }
+  },
+
+  addFriend: async (user) => {
+    set({ isAddingFriend: true });
+    try {
+      const res = await axiosInstance.post(`/messages/users/${user._id}/add`);
+      const addedFriend = res.data;
+      const users = get().users;
+      const alreadyAdded = users.some((existingUser) => existingUser._id === addedFriend._id);
+
+      set({
+        users: alreadyAdded ? users : [addedFriend, ...users],
+        searchedUser: { ...user, isFriend: true },
+        selectedUser: addedFriend,
+      });
+      toast.success(`${addedFriend.fullName} added`);
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      set({ isAddingFriend: false });
+    }
+  },
+
+  clearSearchedUser: () => set({ searchedUser: null }),
+
   sendMessage: async (messageData) => {
     const { selectedUser, messages } = get();
     try {
