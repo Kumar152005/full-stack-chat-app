@@ -52,26 +52,26 @@ const CallModal = () => {
       : `${callType === "video" ? "Video" : "Voice"} call`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="w-full max-w-3xl overflow-hidden rounded-2xl border border-base-300 bg-base-100 shadow-2xl">
-        <div className="border-b border-base-300 p-4">
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center bg-black/70 p-0 sm:items-center sm:p-4">
+      <div className="flex h-[100dvh] w-full max-w-3xl flex-col overflow-hidden border border-base-300 bg-base-100 shadow-2xl sm:h-auto sm:max-h-[calc(100dvh-2rem)] sm:rounded-2xl">
+        <div className="shrink-0 border-b border-base-300 p-4">
           <h2 className="text-lg font-semibold">{title}</h2>
           <p className="text-sm text-base-content/70">{peerUser?.fullName}</p>
         </div>
 
-        <div className="p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
           {callType === "video" ? (
             <div className="grid gap-3 sm:grid-cols-2">
-              <div className="relative min-h-56 overflow-hidden rounded-xl bg-base-300">
+              <div className="relative h-[30dvh] min-h-40 overflow-hidden rounded-xl bg-base-300 sm:h-80">
                 {remoteStream ? (
                   <video
                     ref={remoteVideoRef}
                     autoPlay
                     playsInline
-                    className="h-full min-h-56 w-full object-cover"
+                    className="h-full w-full object-cover"
                   />
                 ) : (
-                  <div className="flex min-h-56 flex-col items-center justify-center gap-3">
+                  <div className="flex h-full flex-col items-center justify-center gap-3">
                     <img
                       src={normalizeImageUrl(peerUser?.profilePic)}
                       alt={peerUser?.fullName || "Caller"}
@@ -88,17 +88,17 @@ const CallModal = () => {
                 </span>
               </div>
 
-              <div className="relative min-h-56 overflow-hidden rounded-xl bg-base-300">
+              <div className="relative h-[30dvh] min-h-40 overflow-hidden rounded-xl bg-base-300 sm:h-80">
                 {localStream ? (
                   <video
                     ref={localVideoRef}
                     autoPlay
                     muted
                     playsInline
-                    className="h-full min-h-56 w-full object-cover"
+                    className="h-full w-full object-cover"
                   />
                 ) : (
-                  <div className="flex min-h-56 items-center justify-center text-sm text-base-content/70">
+                  <div className="flex h-full items-center justify-center px-4 text-center text-sm text-base-content/70">
                     Your camera preview will appear here
                   </div>
                 )}
@@ -108,7 +108,7 @@ const CallModal = () => {
               </div>
             </div>
           ) : (
-            <div className="flex min-h-64 flex-col items-center justify-center gap-4 rounded-xl bg-base-200">
+            <div className="flex min-h-full flex-col items-center justify-center gap-4 rounded-xl bg-base-200 p-6">
               <audio ref={remoteAudioRef} autoPlay />
               <img
                 src={normalizeImageUrl(peerUser?.profilePic)}
@@ -126,7 +126,8 @@ const CallModal = () => {
           )}
         </div>
 
-        <div className="flex items-center justify-center gap-3 border-t border-base-300 p-4">
+        <div className="shrink-0 border-t border-base-300 bg-base-100 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
+          <div className="flex items-center justify-center gap-3">
           {isRinging ? (
             <>
               <button className="btn btn-error btn-circle" onClick={rejectCall} aria-label="Reject call">
@@ -151,6 +152,7 @@ const CallModal = () => {
               </button>
             </>
           )}
+          </div>
         </div>
       </div>
     </div>
