@@ -4,6 +4,7 @@ import { useAuthStore } from "../store/useAuthStore";
 import SidebarSkeleton from "./skeletons/SidebarSkeleton";
 import { Loader2, Search, UserPlus, Users, X } from "lucide-react";
 import { normalizeImageUrl, useImageFallback } from "../lib/image";
+import FriendProfileModal from "./FriendProfileModal";
 
 const Sidebar = () => {
   const {
@@ -17,12 +18,14 @@ const Sidebar = () => {
     searchedUser,
     selectedUser,
     setSelectedUser,
+    unreadCounts,
     users,
   } = useChatStore();
 
   const { onlineUsers } = useAuthStore();
   const [showOnlineOnly, setShowOnlineOnly] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [profileUser, setProfileUser] = useState(null);
   const [searchEmail, setSearchEmail] = useState("");
 
   useEffect(() => {
@@ -40,6 +43,7 @@ const Sidebar = () => {
     ? users.filter((user) => onlineUsers.includes(user._id))
     : users;
   const onlineFriendsCount = users.filter((user) => onlineUsers.includes(user._id)).length;
+  const totalUnreadCount = Object.values(unreadCounts).reduce((total, count) => total + count, 0);
 
   const handleSearchFriend = (e) => {
     e.preventDefault();
@@ -60,6 +64,11 @@ const Sidebar = () => {
           <div className="flex items-center gap-2">
             <Users className="size-6" />
             <span className="font-medium">Contacts</span>
+            {totalUnreadCount > 0 && (
+              <span className="badge badge-error badge-sm text-white">
+                {totalUnreadCount > 99 ? "99+" : totalUnreadCount}
+              </span>
+            )}
           </div>
           <button
             type="button"
@@ -149,39 +158,62 @@ const Sidebar = () => {
       </div>
 
       <div className="overflow-y-auto w-full py-3">
-        {filteredUsers.map((user) => (
-          <button
+        {filteredUsers.map((user) => {
+          const unreadCount = unreadCounts[user._id] || 0;
+          const isOnline = onlineUsers.includes(user._id);
+
+          return (
+          <div
             key={user._id}
-            onClick={() => setSelectedUser(user)}
             className={`
               w-full p-3 flex items-center gap-3
               hover:bg-base-300 transition-colors
               ${selectedUser?._id === user._id ? "bg-base-300 ring-1 ring-base-300" : ""}
             `}
           >
-            <div className="relative">
+            <button
+              type="button"
+              className="relative shrink-0"
+              onClick={() => setProfileUser(user)}
+              aria-label={`View ${user.fullName} profile`}
+            >
               <img
                 src={normalizeImageUrl(user.profilePic)}
                 alt={user.fullName}
                 className="size-12 object-cover rounded-full"
                 onError={useImageFallback}
               />
-              {onlineUsers.includes(user._id) && (
+              {unreadCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white ring-2 ring-base-100">
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              )}
+              {isOnline && (
                 <span
                   className="absolute bottom-0 right-0 size-3 bg-green-500 
                   rounded-full ring-2 ring-zinc-900"
                 />
               )}
-            </div>
+            </button>
 
-            <div className="text-left min-w-0">
+            <button
+              type="button"
+              className="min-w-0 flex-1 text-left"
+              onClick={() => setSelectedUser(user)}
+            >
               <div className="font-medium truncate">{user.fullName}</div>
-              <div className="text-sm text-zinc-400">
-                {onlineUsers.includes(user._id) ? "Online" : "Offline"}
+              <div className="flex items-center justify-between gap-2 text-sm text-zinc-400">
+                <span>{isOnline ? "Online" : "Offline"}</span>
+                {unreadCount > 0 && (
+                  <span className="font-medium text-red-500">
+                    {unreadCount} new
+                  </span>
+                )}
               </div>
-            </div>
-          </button>
-        ))}
+            </button>
+          </div>
+          );
+        })}
 
         {filteredUsers.length === 0 && (
           <div className="px-6 py-8 text-center text-sm text-zinc-500">
@@ -189,6 +221,16 @@ const Sidebar = () => {
           </div>
         )}
       </div>
+
+      <FriendProfileModal
+        user={profileUser}
+        isOnline={profileUser ? onlineUsers.includes(profileUser._id) : false}
+        onClose={() => setProfileUser(null)}
+        onMessage={() => {
+          setSelectedUser(profileUser);
+          setProfileUser(null);
+        }}
+      />
     </aside>
   );
 };
