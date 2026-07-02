@@ -2,6 +2,7 @@ import "dotenv/config";
 import { Server } from "socket.io";
 import http from "http";
 import express from "express";
+import Message from "../models/message.model.js";
 
 const app = express();
 const server = http.createServer(app);
@@ -44,10 +45,38 @@ io.on("connection", (socket) => {
   if (userId) {
     if (!userSocketMap[userId]) userSocketMap[userId] = new Set();
     userSocketMap[userId].add(socket.id);
+
+    Message.find({ receiverId: userId, status: "sent" })
+      .then(async (messages) => {
+        if (messages.length === 0) return;
+
+        await Message.updateMany(
+          { receiverId: userId, status: "sent" },
+          { $set: { status: "delivered" } }
+        );
+
+        messages.forEach((message) => {
+          emitToUser(message.senderId.toString(), "messageStatus", {
+            messageId: message._id,
+            status: "delivered",
+          });
+        });
+      })
+      .catch((error) => {
+        console.log("Error updating delivered messages:", error.message);
+      });
   }
 
   // io.emit() is used to send events to all the connected clients
   io.emit("getOnlineUsers", Object.keys(userSocketMap));
+
+  socket.on("typing:start", ({ to, from }) => {
+    emitToUser(to, "typing:start", { from });
+  });
+
+  socket.on("typing:stop", ({ to, from }) => {
+    emitToUser(to, "typing:stop", { from });
+  });
 
   socket.on("call:offer", ({ to, from, caller, type, offer }) => {
     const delivered = emitToUser(to, "call:offer", {
