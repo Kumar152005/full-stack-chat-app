@@ -11,6 +11,7 @@ export const useChatStore = create((set, get) => ({
   users: [],
   selectedUser: null,
   searchedUser: null,
+  unreadCounts: {},
   isUsersLoading: false,
   isMessagesLoading: false,
   isSearchingUser: false,
@@ -83,6 +84,12 @@ export const useChatStore = create((set, get) => ({
 
   clearSearchedUser: () => set({ searchedUser: null }),
 
+  clearUnreadCount: (userId) => {
+    const unreadCounts = { ...get().unreadCounts };
+    delete unreadCounts[userId];
+    set({ unreadCounts });
+  },
+
   sendMessage: async (messageData) => {
     const { selectedUser, messages } = get();
     try {
@@ -95,23 +102,33 @@ export const useChatStore = create((set, get) => ({
   },
 
   subscribeToMessages: () => {
-    const { selectedUser } = get();
-    if (!selectedUser) return;
-
     const socket = useAuthStore.getState().socket;
     if (!socket) return;
 
     socket.off("newMessage");
     socket.on("newMessage", (newMessage) => {
-      const currentSelectedUser = get().selectedUser;
+      const { messages, selectedUser, unreadCounts, users } = get();
       const isMessageSentFromSelectedUser =
-        currentSelectedUser && String(newMessage.senderId) === String(currentSelectedUser._id);
-      if (!isMessageSentFromSelectedUser) return;
+        selectedUser && String(newMessage.senderId) === String(selectedUser._id);
+
+      if (isMessageSentFromSelectedUser) {
+        set({
+          messages: messages.some((message) => message._id === newMessage._id)
+            ? messages
+            : [...messages, newMessage],
+        });
+        return;
+      }
+
+      const senderId = String(newMessage.senderId);
+      const isKnownFriend = users.some((user) => String(user._id) === senderId);
+      if (!isKnownFriend) return;
 
       set({
-        messages: get().messages.some((message) => message._id === newMessage._id)
-          ? get().messages
-          : [...get().messages, newMessage],
+        unreadCounts: {
+          ...unreadCounts,
+          [senderId]: (unreadCounts[senderId] || 0) + 1,
+        },
       });
     });
   },
@@ -121,5 +138,10 @@ export const useChatStore = create((set, get) => ({
     socket?.off("newMessage");
   },
 
-  setSelectedUser: (selectedUser) => set({ selectedUser }),
+  setSelectedUser: (selectedUser) => {
+    if (selectedUser?._id) {
+      get().clearUnreadCount(selectedUser._id);
+    }
+    set({ selectedUser });
+  },
 }));
