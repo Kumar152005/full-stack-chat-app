@@ -12,6 +12,11 @@ export const useChatStore = create((set, get) => ({
   selectedUser: null,
   searchedUser: null,
   unreadCounts: {},
+  typingUserIds: [],
+  statuses: [],
+  isStatusesLoading: false,
+  notificationPermission:
+    typeof Notification === "undefined" ? "unsupported" : Notification.permission,
   isUsersLoading: false,
   isMessagesLoading: false,
   isSearchingUser: false,
@@ -34,10 +39,34 @@ export const useChatStore = create((set, get) => ({
     try {
       const res = await axiosInstance.get(`/messages/${userId}`);
       set({ messages: res.data });
+      await get().markMessagesSeen(userId);
     } catch (error) {
       toast.error(getErrorMessage(error));
     } finally {
       set({ isMessagesLoading: false });
+    }
+  },
+
+  getStatuses: async () => {
+    set({ isStatusesLoading: true });
+    try {
+      const res = await axiosInstance.get("/statuses");
+      set({ statuses: res.data });
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      set({ isStatusesLoading: false });
+    }
+  },
+
+  createStatus: async (statusData) => {
+    try {
+      const res = await axiosInstance.post("/statuses", statusData);
+      set({ statuses: [res.data, ...get().statuses] });
+      toast.success("Status posted");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+      throw error;
     }
   },
 
@@ -90,6 +119,33 @@ export const useChatStore = create((set, get) => ({
     set({ unreadCounts });
   },
 
+  requestNotificationPermission: async () => {
+    if (typeof Notification === "undefined") {
+      toast.error("This browser does not support notifications");
+      set({ notificationPermission: "unsupported" });
+      return;
+    }
+
+    const permission = await Notification.requestPermission();
+    set({ notificationPermission: permission });
+    if (permission === "granted") toast.success("Notifications enabled");
+  },
+
+  notifyIncomingMessage: (message) => {
+    const { notificationPermission, users } = get();
+    if (notificationPermission !== "granted" || document.visibilityState === "visible") return;
+
+    const sender = users.find((user) => String(user._id) === String(message.senderId));
+    if (!sender) return;
+
+    new Notification(sender.fullName, {
+      body: message.deletedForEveryone
+        ? "Message deleted"
+        : message.text || message.attachment?.name || "New message",
+      icon: sender.profilePic || "/vite.svg",
+    });
+  },
+
   sendMessage: async (messageData) => {
     const { selectedUser, messages } = get();
     try {
@@ -99,6 +155,75 @@ export const useChatStore = create((set, get) => ({
       toast.error(getErrorMessage(error));
       throw error;
     }
+  },
+
+  markMessagesSeen: async (userId) => {
+    try {
+      await axiosInstance.put(`/messages/${userId}/seen`);
+      set({
+        messages: get().messages.map((message) =>
+          String(message.senderId) === String(userId)
+            ? { ...message, status: "seen" }
+            : message
+        ),
+      });
+    } catch (error) {
+      console.error("Failed to mark messages seen:", error);
+    }
+  },
+
+  reactToMessage: async (messageId, emoji) => {
+    try {
+      const res = await axiosInstance.put(`/messages/${messageId}/react`, { emoji });
+      set({
+        messages: get().messages.map((message) =>
+          message._id === messageId ? res.data : message
+        ),
+      });
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
+  },
+
+  deleteMessageForEveryone: async (messageId) => {
+    try {
+      const res = await axiosInstance.delete(`/messages/${messageId}`);
+      set({
+        messages: get().messages.map((message) =>
+          message._id === messageId ? res.data : message
+        ),
+      });
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
+  },
+
+  togglePinChat: async (userId) => {
+    try {
+      const res = await axiosInstance.post(`/messages/users/${userId}/pin`);
+      const isPinned = res.data.isPinned;
+      set({
+        users: get()
+          .users.map((user) => (user._id === userId ? { ...user, isPinned } : user))
+          .sort((a, b) => Number(Boolean(b.isPinned)) - Number(Boolean(a.isPinned))),
+      });
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
+  },
+
+  startTyping: () => {
+    const { selectedUser } = get();
+    const { authUser, socket } = useAuthStore.getState();
+    if (!selectedUser || !authUser || !socket) return;
+    socket.emit("typing:start", { to: selectedUser._id, from: authUser._id });
+  },
+
+  stopTyping: () => {
+    const { selectedUser } = get();
+    const { authUser, socket } = useAuthStore.getState();
+    if (!selectedUser || !authUser || !socket) return;
+    socket.emit("typing:stop", { to: selectedUser._id, from: authUser._id });
   },
 
   subscribeToMessages: () => {
@@ -117,6 +242,7 @@ export const useChatStore = create((set, get) => ({
             ? messages
             : [...messages, newMessage],
         });
+        get().markMessagesSeen(newMessage.senderId);
         return;
       }
 
@@ -130,12 +256,74 @@ export const useChatStore = create((set, get) => ({
           [senderId]: (unreadCounts[senderId] || 0) + 1,
         },
       });
+      get().notifyIncomingMessage(newMessage);
+    });
+
+    socket.off("messagesSeen");
+    socket.on("messagesSeen", ({ by }) => {
+      set({
+        messages: get().messages.map((message) =>
+          String(message.receiverId) === String(by) ? { ...message, status: "seen" } : message
+        ),
+      });
+    });
+
+    socket.off("messageStatus");
+    socket.on("messageStatus", ({ messageId, status }) => {
+      set({
+        messages: get().messages.map((message) =>
+          message._id === messageId ? { ...message, status } : message
+        ),
+      });
+    });
+
+    socket.off("messageReaction");
+    socket.on("messageReaction", ({ messageId, reactions }) => {
+      set({
+        messages: get().messages.map((message) =>
+          message._id === messageId ? { ...message, reactions } : message
+        ),
+      });
+    });
+
+    socket.off("messageDeleted");
+    socket.on("messageDeleted", ({ messageId }) => {
+      set({
+        messages: get().messages.map((message) =>
+          message._id === messageId
+            ? { ...message, deletedForEveryone: true, text: "", image: "", attachment: null }
+            : message
+        ),
+      });
+    });
+
+    socket.off("typing:start");
+    socket.on("typing:start", ({ from }) => {
+      const typingUserIds = get().typingUserIds;
+      if (!typingUserIds.includes(from)) set({ typingUserIds: [...typingUserIds, from] });
+    });
+
+    socket.off("typing:stop");
+    socket.on("typing:stop", ({ from }) => {
+      set({ typingUserIds: get().typingUserIds.filter((userId) => userId !== from) });
+    });
+
+    socket.off("newStatus");
+    socket.on("newStatus", (status) => {
+      set({ statuses: [status, ...get().statuses] });
     });
   },
 
   unsubscribeFromMessages: () => {
     const socket = useAuthStore.getState().socket;
     socket?.off("newMessage");
+    socket?.off("messagesSeen");
+    socket?.off("messageStatus");
+    socket?.off("messageReaction");
+    socket?.off("messageDeleted");
+    socket?.off("typing:start");
+    socket?.off("typing:stop");
+    socket?.off("newStatus");
   },
 
   setSelectedUser: (selectedUser) => {
