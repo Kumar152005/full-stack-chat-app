@@ -16,11 +16,24 @@ export const getUserForSidebar = async (req, res) => {
     try {
         const loggedInUserId = req.user._id;
         const friendIds = req.user.friends || [];
+        const pinnedChatIds = (req.user.pinnedChats || []).map((id) => id.toString());
         const filteredUsers = await User.find({
             _id: { $in: friendIds, $ne: loggedInUserId },
         }).select("-password");
+
+        filteredUsers.sort((a, b) => {
+            const aIndex = pinnedChatIds.indexOf(a._id.toString());
+            const bIndex = pinnedChatIds.indexOf(b._id.toString());
+            if (aIndex === -1 && bIndex === -1) return 0;
+            if (aIndex === -1) return 1;
+            if (bIndex === -1) return -1;
+            return aIndex - bIndex;
+        });
         
-        res.status(200).json(filteredUsers);
+        res.status(200).json(filteredUsers.map((user) => ({
+            ...user.toObject(),
+            isPinned: pinnedChatIds.includes(user._id.toString()),
+        })));
     } catch (error) {
         console.error("Error in getUserForSidebar: ", error.message);
         res.status(500).json({ error: "Internal server error" });
@@ -105,7 +118,7 @@ export const getMessages = async(req,res) => {
 
 export const sendMessage = async (req, res) => {
     try {
-        const { text, image, attachment } = req.body;
+        const { text, image, attachment, voice } = req.body;
         const { id: receiverId } =  req.params;
         const senderId =req.user._id;
 
@@ -132,6 +145,20 @@ export const sendMessage = async (req, res) => {
                 imageUrl = getBrowserSafeImageUrl(uploadResponse);
             }
         }
+        if (voice?.data) {
+            const uploadResponse = await cloudinary.uploader.upload(voice.data, {
+                resource_type: "video",
+            });
+
+            attachmentData = {
+                url: uploadResponse.secure_url,
+                name: voice.name || "Voice note",
+                type: voice.type || "audio/webm",
+                size: voice.size,
+            };
+        }
+
+        const receiverSocketIds = getReceiverSocketIds(receiverId);
 
         const newMessage = new Message({
             senderId,
@@ -139,18 +166,134 @@ export const sendMessage = async (req, res) => {
             text,
             image: imageUrl,
             attachment: attachmentData,
+            status: receiverSocketIds.length > 0 ? "delivered" : "sent",
         });
 
         await newMessage.save();
 
-         const receiverSocketIds = getReceiverSocketIds(receiverId);
-    if (receiverSocketIds.length > 0) {
-      io.to(receiverSocketIds).emit("newMessage", newMessage);
-    }
+        if (receiverSocketIds.length > 0) {
+            io.to(receiverSocketIds).emit("newMessage", newMessage);
+        }
     
         res.status(201).json(newMessage);
     } catch (error) {
       console.log("Error in sendMessage controller: ", error.message);
       res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+export const markMessagesSeen = async (req, res) => {
+    try {
+        const { id: friendId } = req.params;
+        const myId = req.user._id;
+
+        const result = await Message.updateMany(
+            { senderId: friendId, receiverId: myId, status: { $ne: "seen" } },
+            { $set: { status: "seen" } }
+        );
+
+        const senderSocketIds = getReceiverSocketIds(friendId);
+        if (senderSocketIds.length > 0) {
+            io.to(senderSocketIds).emit("messagesSeen", { by: myId, conversationWith: friendId });
+        }
+
+        res.status(200).json({ updatedCount: result.modifiedCount });
+    } catch (error) {
+        console.log("Error in markMessagesSeen controller: ", error.message);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+export const reactToMessage = async (req, res) => {
+    try {
+        const { id: messageId } = req.params;
+        const { emoji } = req.body;
+        const userId = req.user._id;
+
+        if (!emoji) {
+            return res.status(400).json({ message: "Emoji is required" });
+        }
+
+        const message = await Message.findById(messageId);
+        if (!message) {
+            return res.status(404).json({ message: "Message not found" });
+        }
+
+        const canReact =
+            message.senderId.toString() === userId.toString() ||
+            message.receiverId.toString() === userId.toString();
+        if (!canReact) {
+            return res.status(403).json({ message: "Not allowed" });
+        }
+
+        message.reactions = (message.reactions || []).filter(
+            (reaction) => reaction.userId.toString() !== userId.toString()
+        );
+        message.reactions.push({ userId, emoji });
+        await message.save();
+
+        const payload = { messageId: message._id, reactions: message.reactions };
+        io.to(getReceiverSocketIds(message.senderId)).emit("messageReaction", payload);
+        io.to(getReceiverSocketIds(message.receiverId)).emit("messageReaction", payload);
+
+        res.status(200).json(message);
+    } catch (error) {
+        console.log("Error in reactToMessage controller: ", error.message);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+export const deleteMessageForEveryone = async (req, res) => {
+    try {
+        const { id: messageId } = req.params;
+        const userId = req.user._id;
+
+        const message = await Message.findById(messageId);
+        if (!message) {
+            return res.status(404).json({ message: "Message not found" });
+        }
+        if (message.senderId.toString() !== userId.toString()) {
+            return res.status(403).json({ message: "Only sender can delete this message" });
+        }
+
+        message.deletedForEveryone = true;
+        message.text = "";
+        message.image = "";
+        message.attachment = undefined;
+        await message.save();
+
+        const payload = { messageId: message._id };
+        io.to(getReceiverSocketIds(message.senderId)).emit("messageDeleted", payload);
+        io.to(getReceiverSocketIds(message.receiverId)).emit("messageDeleted", payload);
+
+        res.status(200).json(message);
+    } catch (error) {
+        console.log("Error in deleteMessageForEveryone controller: ", error.message);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+export const togglePinChat = async (req, res) => {
+    try {
+        const { id: friendId } = req.params;
+        const userId = req.user._id;
+        const pinnedChatIds = (req.user.pinnedChats || []).map((id) => id.toString());
+        const isPinned = pinnedChatIds.includes(friendId);
+
+        const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            isPinned
+                ? { $pull: { pinnedChats: friendId } }
+                : { $addToSet: { pinnedChats: friendId } },
+            { new: true }
+        ).select("-password");
+
+        res.status(200).json({
+            pinnedChats: updatedUser.pinnedChats,
+            isPinned: !isPinned,
+        });
+    } catch (error) {
+        console.log("Error in togglePinChat controller: ", error.message);
+        res.status(500).json({ message: "Internal server error" });
     }
 };
