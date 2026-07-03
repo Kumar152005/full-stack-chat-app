@@ -15,6 +15,7 @@ export const useAuthStore = create((set, get) => ({
   isCheckingAuth: true,
   onlineUsers: [],
   socket: null,
+  socketStatus: "disconnected",
 
   checkAuth: async () => {
     try {
@@ -94,9 +95,33 @@ export const useAuthStore = create((set, get) => ({
       query: {
         userId: authUser._id,
       },
+      reconnectionAttempts: 10,
+      reconnectionDelay: 800,
     });
 
-    set({ socket });
+    set({ socket, socketStatus: "connecting" });
+
+    socket.on("connect", () => {
+      set({ socketStatus: "connected" });
+    });
+
+    socket.on("disconnect", () => {
+      set({ socketStatus: "disconnected", onlineUsers: [] });
+    });
+
+    socket.io.on("reconnect_attempt", () => {
+      set({ socketStatus: "reconnecting" });
+    });
+
+    socket.io.on("reconnect", () => {
+      set({ socketStatus: "connected" });
+      toast.success("Reconnected");
+    });
+
+    socket.io.on("reconnect_failed", () => {
+      set({ socketStatus: "disconnected" });
+      toast.error("Connection lost. Please refresh if it does not recover.");
+    });
 
     socket.on("getOnlineUsers", (userIds) => {
       set({ onlineUsers: userIds });
@@ -104,6 +129,6 @@ export const useAuthStore = create((set, get) => ({
   },
   disconnectSocket: () => {
     get().socket?.disconnect();
-    set({ socket: null, onlineUsers: [] });
+    set({ socket: null, onlineUsers: [], socketStatus: "disconnected" });
   },
 }));
