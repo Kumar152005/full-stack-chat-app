@@ -212,6 +212,31 @@ export const useCallStore = create((set, get) => ({
     get().cleanupCall();
   },
 
+  switchCallToFriend: (receiver) => {
+    const { authUser, onlineUsers, socket } = useAuthStore.getState();
+    const { callType, peerUser } = get();
+    const nextCallType = callType || "voice";
+
+    if (!authUser || !socket || !receiver?._id) return;
+    if (peerUser?._id === receiver._id) return;
+    if (!onlineUsers.includes(receiver._id)) {
+      toast.error(`${receiver.fullName} is offline`);
+      return;
+    }
+
+    if (peerUser) {
+      socket.emit("call:end", {
+        to: peerUser._id,
+        from: authUser._id,
+      });
+    }
+
+    get().cleanupCall();
+    setTimeout(() => {
+      get().startCall(receiver, nextCallType);
+    }, 0);
+  },
+
   toggleMute: () => {
     const { localStream, isMuted } = get();
     localStream?.getAudioTracks().forEach((track) => {
