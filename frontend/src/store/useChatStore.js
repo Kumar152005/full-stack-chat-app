@@ -13,6 +13,11 @@ export const useChatStore = create((set, get) => ({
   searchedUser: null,
   unreadCounts: {},
   typingUserIds: [],
+  hasMoreMessages: false,
+  messageCursor: null,
+  isLoadingOlderMessages: false,
+  sendingMessageIds: [],
+  failedMessages: [],
   statuses: [],
   isStatusesLoading: false,
   notificationPermission:
@@ -37,13 +42,41 @@ export const useChatStore = create((set, get) => ({
   getMessages: async (userId) => {
     set({ isMessagesLoading: true });
     try {
-      const res = await axiosInstance.get(`/messages/${userId}`);
-      set({ messages: res.data });
+      const res = await axiosInstance.get(`/messages/${userId}`, {
+        params: { limit: 30 },
+      });
+      set({
+        messages: res.data.messages || res.data,
+        hasMoreMessages: Boolean(res.data.hasMore),
+        messageCursor: res.data.nextCursor || null,
+      });
       await get().markMessagesSeen(userId);
     } catch (error) {
       toast.error(getErrorMessage(error));
     } finally {
       set({ isMessagesLoading: false });
+    }
+  },
+
+  loadOlderMessages: async () => {
+    const { selectedUser, messageCursor, isLoadingOlderMessages, hasMoreMessages, messages } = get();
+    if (!selectedUser || !messageCursor || isLoadingOlderMessages || !hasMoreMessages) return;
+
+    set({ isLoadingOlderMessages: true });
+    try {
+      const res = await axiosInstance.get(`/messages/${selectedUser._id}`, {
+        params: { limit: 30, before: messageCursor },
+      });
+      const olderMessages = res.data.messages || [];
+      set({
+        messages: [...olderMessages, ...messages],
+        hasMoreMessages: Boolean(res.data.hasMore),
+        messageCursor: res.data.nextCursor || null,
+      });
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      set({ isLoadingOlderMessages: false });
     }
   },
 
@@ -159,13 +192,63 @@ export const useChatStore = create((set, get) => ({
 
   sendMessage: async (messageData) => {
     const { selectedUser, messages } = get();
+    const optimisticId =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `pending-${Date.now()}`;
+    const optimisticMessage = {
+      _id: optimisticId,
+      senderId: useAuthStore.getState().authUser?._id,
+      receiverId: selectedUser._id,
+      text: messageData.text,
+      image: messageData.uploadedImage?.url || messageData.image,
+      attachment: messageData.attachment?.url ? messageData.attachment : messageData.voice ? {
+        url: "",
+        name: "Voice note",
+        type: messageData.voice.type,
+        size: messageData.voice.size,
+      } : null,
+      status: "sent",
+      createdAt: new Date().toISOString(),
+      isPending: true,
+    };
+
+    set({
+      messages: [...messages, optimisticMessage],
+      sendingMessageIds: [...get().sendingMessageIds, optimisticId],
+    });
+
     try {
       const res = await axiosInstance.post(`/messages/send/${selectedUser._id}`, messageData);
-      set({ messages: [...messages, res.data] });
+      set({
+        messages: get().messages.map((message) =>
+          message._id === optimisticId ? res.data : message
+        ),
+        sendingMessageIds: get().sendingMessageIds.filter((id) => id !== optimisticId),
+      });
+      return res.data;
     } catch (error) {
       toast.error(getErrorMessage(error));
+      set({
+        messages: get().messages.map((message) =>
+          message._id === optimisticId ? { ...message, isPending: false, isFailed: true } : message
+        ),
+        sendingMessageIds: get().sendingMessageIds.filter((id) => id !== optimisticId),
+        failedMessages: [...get().failedMessages, { id: optimisticId, data: messageData }],
+      });
       throw error;
     }
+  },
+
+  retryFailedMessage: async (messageId) => {
+    const failedMessage = get().failedMessages.find((message) => message.id === messageId);
+    if (!failedMessage) return;
+
+    set({
+      messages: get().messages.filter((message) => message._id !== messageId),
+      failedMessages: get().failedMessages.filter((message) => message.id !== messageId),
+    });
+    await get().sendMessage(failedMessage.data);
   },
 
   markMessagesSeen: async (userId) => {
@@ -347,6 +430,13 @@ export const useChatStore = create((set, get) => ({
     if (selectedUser?._id) {
       get().clearUnreadCount(selectedUser._id);
     }
-    set({ selectedUser });
+    set({
+      selectedUser,
+      messages: [],
+      hasMoreMessages: false,
+      messageCursor: null,
+      failedMessages: [],
+      sendingMessageIds: [],
+    });
   },
 }));
