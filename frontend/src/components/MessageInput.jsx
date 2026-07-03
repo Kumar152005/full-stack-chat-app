@@ -4,11 +4,24 @@ import { FileText, Mic, Paperclip, Send, Square, X } from "lucide-react";
 import toast from "react-hot-toast";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const VOICE_MIME_TYPES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/mp4",
+  "audio/mpeg",
+  "audio/ogg;codecs=opus",
+];
+
+const getSupportedVoiceMimeType = () => {
+  if (typeof MediaRecorder === "undefined") return "";
+  return VOICE_MIME_TYPES.find((type) => MediaRecorder.isTypeSupported(type)) || "";
+};
 
 const MessageInput = () => {
   const [text, setText] = useState("");
   const [attachment, setAttachment] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
+  const [isSendingVoice, setIsSendingVoice] = useState(false);
   const fileInputRef = useRef(null);
   const mediaRecorderRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -48,14 +61,22 @@ const MessageInput = () => {
   const sendVoiceNote = (blob) => {
     const reader = new FileReader();
     reader.onloadend = async () => {
-      await sendMessage({
-        voice: {
-          data: reader.result,
-          name: "Voice note",
-          type: blob.type || "audio/webm",
-          size: blob.size,
-        },
-      });
+      try {
+        setIsSendingVoice(true);
+        await sendMessage({
+          voice: {
+            data: reader.result,
+            name: "Voice note",
+            type: blob.type || "audio/webm",
+            size: blob.size,
+          },
+        });
+        toast.success("Voice note sent");
+      } catch (error) {
+        console.error("Failed to send voice note:", error);
+      } finally {
+        setIsSendingVoice(false);
+      }
     };
     reader.readAsDataURL(blob);
   };
@@ -65,10 +86,15 @@ const MessageInput = () => {
       toast.error("Voice recording is not supported in this browser");
       return;
     }
+    if (typeof MediaRecorder === "undefined") {
+      toast.error("This browser cannot record voice notes");
+      return;
+    }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
+      const mimeType = getSupportedVoiceMimeType();
+      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
       const chunks = [];
 
       recorder.ondataavailable = (event) => {
@@ -77,11 +103,15 @@ const MessageInput = () => {
       recorder.onstop = () => {
         stream.getTracks().forEach((track) => track.stop());
         const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
-        if (blob.size > 0) sendVoiceNote(blob);
+        if (blob.size > 0) {
+          sendVoiceNote(blob);
+        } else {
+          toast.error("Voice note was empty. Please try again.");
+        }
       };
 
       mediaRecorderRef.current = recorder;
-      recorder.start();
+      recorder.start(1000);
       setIsRecording(true);
     } catch (error) {
       console.error("Unable to record voice note:", error);
@@ -90,7 +120,9 @@ const MessageInput = () => {
   };
 
   const stopRecording = () => {
-    mediaRecorderRef.current?.stop();
+    if (mediaRecorderRef.current?.state === "recording") {
+      mediaRecorderRef.current.stop();
+    }
     setIsRecording(false);
   };
 
@@ -189,8 +221,9 @@ const MessageInput = () => {
           type="button"
           className={`btn btn-sm btn-circle ${isRecording ? "btn-error" : ""}`}
           onClick={isRecording ? stopRecording : startRecording}
+          disabled={isSendingVoice}
           aria-label={isRecording ? "Stop recording" : "Record voice note"}
-          title={isRecording ? "Stop recording" : "Record voice note"}
+          title={isRecording ? "Stop recording" : isSendingVoice ? "Sending voice note" : "Record voice note"}
         >
           {isRecording ? <Square size={18} /> : <Mic size={20} />}
         </button>
