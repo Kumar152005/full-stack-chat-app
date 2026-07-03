@@ -63,7 +63,18 @@ export const useChatStore = create((set, get) => ({
     try {
       const res = await axiosInstance.post("/statuses", statusData);
       set({ statuses: [res.data, ...get().statuses] });
-      toast.success("Status posted");
+      toast.success("Aura Drop posted");
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+      throw error;
+    }
+  },
+
+  deleteStatus: async (statusId) => {
+    try {
+      await axiosInstance.delete(`/statuses/${statusId}`);
+      set({ statuses: get().statuses.filter((status) => status._id !== statusId) });
+      toast.success("Aura Drop deleted");
     } catch (error) {
       toast.error(getErrorMessage(error));
       throw error;
@@ -312,6 +323,11 @@ export const useChatStore = create((set, get) => ({
     socket.on("newStatus", (status) => {
       set({ statuses: [status, ...get().statuses] });
     });
+
+    socket.off("statusDeleted");
+    socket.on("statusDeleted", ({ statusId }) => {
+      set({ statuses: get().statuses.filter((status) => status._id !== statusId) });
+    });
   },
 
   unsubscribeFromMessages: () => {
@@ -324,6 +340,7 @@ export const useChatStore = create((set, get) => ({
     socket?.off("typing:start");
     socket?.off("typing:stop");
     socket?.off("newStatus");
+    socket?.off("statusDeleted");
   },
 
   setSelectedUser: (selectedUser) => {
