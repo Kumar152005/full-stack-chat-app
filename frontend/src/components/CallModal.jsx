@@ -1,11 +1,13 @@
-import { useEffect, useRef } from "react";
-import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Mic, MicOff, Phone, PhoneOff, UserPlus, Video, VideoOff, X } from "lucide-react";
 import { useAuthStore } from "../store/useAuthStore";
+import { useChatStore } from "../store/useChatStore";
 import { useCallStore } from "../store/useCallStore";
 import { normalizeImageUrl, useImageFallback } from "../lib/image";
 
 const CallModal = () => {
-  const { socket } = useAuthStore();
+  const { onlineUsers, socket } = useAuthStore();
+  const { users } = useChatStore();
   const {
     callStatus,
     callType,
@@ -17,11 +19,13 @@ const CallModal = () => {
     acceptCall,
     rejectCall,
     endCall,
+    switchCallToFriend,
     toggleMute,
     toggleCamera,
     subscribeToCallEvents,
     unsubscribeFromCallEvents,
   } = useCallStore();
+  const [isAddCallOpen, setIsAddCallOpen] = useState(false);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
@@ -40,11 +44,16 @@ const CallModal = () => {
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = remoteStream;
   }, [remoteStream]);
 
+  useEffect(() => {
+    if (callStatus === "idle") setIsAddCallOpen(false);
+  }, [callStatus]);
+
   if (callStatus === "idle") return null;
 
   const isRinging = callStatus === "ringing";
   const isCalling = callStatus === "calling";
   const isInCall = callStatus === "in-call";
+  const callableFriends = users.filter((user) => user._id !== peerUser?._id);
   const title = isRinging
     ? `Incoming ${callType} call`
     : isCalling
@@ -127,6 +136,60 @@ const CallModal = () => {
         </div>
 
         <div className="shrink-0 border-t border-base-300 bg-base-100 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
+          {isAddCallOpen && !isRinging && (
+            <div className="mx-auto mb-4 max-w-md rounded-2xl border border-base-300 bg-base-200 p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <div>
+                  <div className="font-medium">Add call</div>
+                  <div className="text-xs text-base-content/60">Choose from added friends</div>
+                </div>
+                <button
+                  className="btn btn-ghost btn-circle btn-xs"
+                  type="button"
+                  onClick={() => setIsAddCallOpen(false)}
+                  aria-label="Close add call"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+              <div className="max-h-44 space-y-2 overflow-y-auto">
+                {callableFriends.map((user) => {
+                  const isOnline = onlineUsers.includes(user._id);
+
+                  return (
+                    <button
+                      key={user._id}
+                      type="button"
+                      className="flex w-full items-center gap-3 rounded-xl bg-base-100 p-2 text-left disabled:opacity-50"
+                      onClick={() => {
+                        setIsAddCallOpen(false);
+                        switchCallToFriend(user);
+                      }}
+                      disabled={!isOnline}
+                    >
+                      <img
+                        src={normalizeImageUrl(user.profilePic)}
+                        alt={user.fullName}
+                        className="size-9 rounded-full object-cover"
+                        onError={useImageFallback}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-sm font-medium">{user.fullName}</div>
+                        <div className="text-xs text-base-content/60">
+                          {isOnline ? "Online" : "Offline"}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+                {callableFriends.length === 0 && (
+                  <div className="py-3 text-center text-sm text-base-content/60">
+                    Add friends first to call them.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-center gap-3">
           {isRinging ? (
             <>
@@ -141,6 +204,14 @@ const CallModal = () => {
             <>
               <button className="btn btn-circle" onClick={toggleMute} aria-label="Toggle microphone">
                 {isMuted ? <MicOff className="size-5" /> : <Mic className="size-5" />}
+              </button>
+              <button
+                className="btn btn-circle"
+                onClick={() => setIsAddCallOpen((isOpen) => !isOpen)}
+                aria-label="Add call"
+                title="Add call"
+              >
+                <UserPlus className="size-5" />
               </button>
               {callType === "video" && (
                 <button className="btn btn-circle" onClick={toggleCamera} aria-label="Toggle camera">
