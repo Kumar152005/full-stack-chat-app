@@ -29,11 +29,15 @@ export const getStatuses = async (req, res) => {
 
 export const createStatus = async (req, res) => {
   try {
-    const { text, image } = req.body;
+    const { text, image, expiresInHours = 24 } = req.body;
 
     if (!text?.trim() && !image) {
-      return res.status(400).json({ message: "Add text or photo to post a status" });
+      return res.status(400).json({ message: "Add text or photo to post an Aura Drop" });
     }
+
+    const allowedDurations = [1, 6, 12, 24, 48, 168];
+    const duration = Number(expiresInHours);
+    const safeDuration = allowedDurations.includes(duration) ? duration : 24;
 
     let imageUrl;
     if (image) {
@@ -45,7 +49,7 @@ export const createStatus = async (req, res) => {
       userId: req.user._id,
       text: text?.trim(),
       image: imageUrl,
-      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + safeDuration * 60 * 60 * 1000),
     });
     await status.populate("userId", "fullName email profilePic");
 
@@ -70,10 +74,16 @@ export const deleteStatus = async (req, res) => {
     });
 
     if (!status) {
-      return res.status(404).json({ message: "Status not found" });
+      return res.status(404).json({ message: "Aura Drop not found" });
     }
 
-    res.status(200).json({ message: "Status deleted" });
+    const friendIds = req.user.friends || [];
+    friendIds.forEach((friendId) => {
+      const socketIds = getReceiverSocketIds(friendId);
+      if (socketIds.length > 0) io.to(socketIds).emit("statusDeleted", { statusId: req.params.id });
+    });
+
+    res.status(200).json({ message: "Aura Drop deleted" });
   } catch (error) {
     console.log("Error in deleteStatus controller:", error.message);
     res.status(500).json({ message: "Internal server error" });
