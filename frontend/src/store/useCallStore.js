@@ -2,6 +2,8 @@ import { create } from "zustand";
 import toast from "react-hot-toast";
 import { useAuthStore } from "./useAuthStore";
 
+const MAX_GROUP_CALL_PARTICIPANTS = 4;
+
 const iceServers = [
   { urls: "stun:stun.l.google.com:19302" },
   { urls: "stun:stun1.l.google.com:19302" },
@@ -22,48 +24,92 @@ const stopStream = (stream) => {
   stream?.getTracks().forEach((track) => track.stop());
 };
 
+const getCallerProfile = (authUser) => ({
+  _id: authUser._id,
+  fullName: authUser.fullName,
+  profilePic: authUser.profilePic,
+});
+
+const uniqueParticipants = (participants) => {
+  const seen = new Set();
+  return participants.filter((participant) => {
+    if (!participant?._id || seen.has(participant._id)) return false;
+    seen.add(participant._id);
+    return true;
+  });
+};
+
 export const useCallStore = create((set, get) => ({
   callStatus: "idle",
   callType: null,
+  roomId: null,
   peerUser: null,
+  participants: [],
   localStream: null,
-  remoteStream: null,
-  incomingOffer: null,
-  peerConnection: null,
-  pendingIceCandidates: [],
+  remoteStreams: {},
+  incomingRoom: null,
+  peerConnections: {},
+  pendingIceCandidates: {},
   isMuted: false,
   isCameraOff: false,
 
   cleanupCall: () => {
-    const { peerConnection, localStream, remoteStream } = get();
+    const { peerConnections, localStream, remoteStreams } = get();
 
-    peerConnection?.close();
+    Object.values(peerConnections).forEach((peerConnection) => peerConnection?.close());
     stopStream(localStream);
-    stopStream(remoteStream);
+    Object.values(remoteStreams).forEach(stopStream);
 
     set({
       callStatus: "idle",
       callType: null,
+      roomId: null,
       peerUser: null,
+      participants: [],
       localStream: null,
-      remoteStream: null,
-      incomingOffer: null,
-      peerConnection: null,
-      pendingIceCandidates: [],
+      remoteStreams: {},
+      incomingRoom: null,
+      peerConnections: {},
+      pendingIceCandidates: {},
       isMuted: false,
       isCameraOff: false,
     });
   },
 
-  createPeerConnection: (peerId) => {
+  removePeer: (participantId) => {
+    const { peerConnections, remoteStreams, participants, pendingIceCandidates } = get();
+    peerConnections[participantId]?.close();
+    stopStream(remoteStreams[participantId]);
+
+    const nextPeerConnections = { ...peerConnections };
+    const nextRemoteStreams = { ...remoteStreams };
+    const nextPendingIceCandidates = { ...pendingIceCandidates };
+    delete nextPeerConnections[participantId];
+    delete nextRemoteStreams[participantId];
+    delete nextPendingIceCandidates[participantId];
+
+    set({
+      peerConnections: nextPeerConnections,
+      remoteStreams: nextRemoteStreams,
+      pendingIceCandidates: nextPendingIceCandidates,
+      participants: participants.filter((participant) => participant._id !== participantId),
+    });
+  },
+
+  createPeerConnection: (participantId) => {
+    const existingConnection = get().peerConnections[participantId];
+    if (existingConnection) return existingConnection;
+
     const peerConnection = new RTCPeerConnection({ iceServers });
     const { socket, authUser } = useAuthStore.getState();
 
     peerConnection.onicecandidate = (event) => {
-      if (!event.candidate) return;
+      const { roomId } = get();
+      if (!event.candidate || !roomId) return;
 
-      socket?.emit("call:ice-candidate", {
-        to: peerId,
+      socket?.emit("group-call:ice-candidate", {
+        roomId,
+        to: participantId,
         from: authUser?._id,
         candidate: event.candidate,
       });
@@ -71,28 +117,79 @@ export const useCallStore = create((set, get) => ({
 
     peerConnection.ontrack = (event) => {
       const [remoteStream] = event.streams;
-      if (remoteStream) set({ remoteStream });
+      if (!remoteStream) return;
+
+      set({
+        remoteStreams: {
+          ...get().remoteStreams,
+          [participantId]: remoteStream,
+        },
+      });
     };
 
     peerConnection.onconnectionstatechange = () => {
-      if (["failed", "closed"].includes(peerConnection.connectionState)) {
-        get().cleanupCall();
+      if (["failed", "closed", "disconnected"].includes(peerConnection.connectionState)) {
+        get().removePeer(participantId);
       }
     };
 
-    set({ peerConnection });
+    set({
+      peerConnections: {
+        ...get().peerConnections,
+        [participantId]: peerConnection,
+      },
+    });
+
     return peerConnection;
   },
 
-  flushIceCandidates: async () => {
-    const { peerConnection, pendingIceCandidates } = get();
+  addLocalTracks: (peerConnection, localStream) => {
+    const existingTrackIds = new Set(
+      peerConnection.getSenders().map((sender) => sender.track?.id).filter(Boolean)
+    );
+
+    localStream.getTracks().forEach((track) => {
+      if (!existingTrackIds.has(track.id)) {
+        peerConnection.addTrack(track, localStream);
+      }
+    });
+  },
+
+  flushIceCandidates: async (participantId) => {
+    const { peerConnections, pendingIceCandidates } = get();
+    const peerConnection = peerConnections[participantId];
     if (!peerConnection?.remoteDescription) return;
 
-    for (const candidate of pendingIceCandidates) {
+    const candidates = pendingIceCandidates[participantId] || [];
+    for (const candidate of candidates) {
       await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     }
 
-    set({ pendingIceCandidates: [] });
+    set({
+      pendingIceCandidates: {
+        ...get().pendingIceCandidates,
+        [participantId]: [],
+      },
+    });
+  },
+
+  createOfferForParticipant: async (participant) => {
+    const { authUser, socket } = useAuthStore.getState();
+    const { localStream, roomId } = get();
+    if (!authUser || !socket || !localStream || !roomId || participant._id === authUser._id) return;
+
+    const peerConnection = get().createPeerConnection(participant._id);
+    get().addLocalTracks(peerConnection, localStream);
+
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
+
+    socket.emit("group-call:offer", {
+      roomId,
+      to: participant._id,
+      from: authUser._id,
+      offer,
+    });
   },
 
   startCall: async (receiver, type) => {
@@ -105,33 +202,30 @@ export const useCallStore = create((set, get) => ({
       return;
     }
 
+    const roomId =
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${authUser._id}-${Date.now()}`;
+    const caller = getCallerProfile(authUser);
+
     set({
       callStatus: "calling",
       callType: type,
+      roomId,
       peerUser: receiver,
+      participants: [caller],
     });
 
     try {
       const localStream = await getMediaStream(type);
-      const peerConnection = get().createPeerConnection(receiver._id);
-
-      localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
-
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-
       set({ localStream });
 
-      socket.emit("call:offer", {
-        to: receiver._id,
+      socket.emit("group-call:create", {
+        roomId,
         from: authUser._id,
-        caller: {
-          _id: authUser._id,
-          fullName: authUser.fullName,
-          profilePic: authUser.profilePic,
-        },
+        caller,
         type,
-        offer,
+        inviteeIds: [receiver._id],
       });
     } catch (error) {
       console.error("Error starting call:", error);
@@ -146,32 +240,29 @@ export const useCallStore = create((set, get) => ({
 
   acceptCall: async () => {
     const { socket, authUser } = useAuthStore.getState();
-    const { incomingOffer, callType, peerUser } = get();
+    const { incomingRoom } = get();
 
-    if (!socket || !authUser || !incomingOffer || !peerUser) return;
+    if (!socket || !authUser || !incomingRoom) return;
 
     try {
-      set({ callStatus: "connecting" });
-      const localStream = await getMediaStream(callType);
-      const peerConnection = get().createPeerConnection(peerUser._id);
-
-      localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(incomingOffer));
-      await get().flushIceCandidates();
-
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-
       set({
-        callStatus: "in-call",
-        localStream,
-        incomingOffer: null,
+        callStatus: "connecting",
+        roomId: incomingRoom.roomId,
+        callType: incomingRoom.type,
+        peerUser: incomingRoom.caller,
+        participants: uniqueParticipants([
+          ...(incomingRoom.participants || []),
+          getCallerProfile(authUser),
+        ]),
       });
 
-      socket.emit("call:answer", {
-        to: peerUser._id,
+      const localStream = await getMediaStream(incomingRoom.type);
+      set({ localStream, incomingRoom: null });
+
+      socket.emit("group-call:accept", {
+        roomId: incomingRoom.roomId,
         from: authUser._id,
-        answer,
+        participant: getCallerProfile(authUser),
       });
     } catch (error) {
       console.error("Error accepting call:", error);
@@ -186,11 +277,17 @@ export const useCallStore = create((set, get) => ({
 
   rejectCall: () => {
     const { socket, authUser } = useAuthStore.getState();
-    const { peerUser } = get();
+    const { incomingRoom, peerUser } = get();
 
-    if (peerUser) {
-      socket?.emit("call:reject", {
-        to: peerUser._id,
+    if (incomingRoom) {
+      socket?.emit("group-call:reject", {
+        roomId: incomingRoom.roomId,
+        from: authUser?._id,
+        to: incomingRoom.from,
+      });
+    } else if (peerUser) {
+      socket?.emit("group-call:leave", {
+        roomId: get().roomId,
         from: authUser?._id,
       });
     }
@@ -200,11 +297,11 @@ export const useCallStore = create((set, get) => ({
 
   endCall: () => {
     const { socket, authUser } = useAuthStore.getState();
-    const { peerUser } = get();
+    const { roomId } = get();
 
-    if (peerUser) {
-      socket?.emit("call:end", {
-        to: peerUser._id,
+    if (roomId) {
+      socket?.emit("group-call:end", {
+        roomId,
         from: authUser?._id,
       });
     }
@@ -214,27 +311,30 @@ export const useCallStore = create((set, get) => ({
 
   switchCallToFriend: (receiver) => {
     const { authUser, onlineUsers, socket } = useAuthStore.getState();
-    const { callType, peerUser } = get();
-    const nextCallType = callType || "voice";
+    const { roomId, participants, callStatus } = get();
 
-    if (!authUser || !socket || !receiver?._id) return;
-    if (peerUser?._id === receiver._id) return;
+    if (!authUser || !socket || !receiver?._id || !roomId) return;
+    if (!["calling", "connecting", "in-call"].includes(callStatus)) return;
+    if (participants.some((participant) => participant._id === receiver._id)) {
+      toast(`${receiver.fullName} is already in this call`);
+      return;
+    }
+    if (participants.length >= MAX_GROUP_CALL_PARTICIPANTS) {
+      toast.error("Group calls are limited to 4 people");
+      return;
+    }
     if (!onlineUsers.includes(receiver._id)) {
       toast.error(`${receiver.fullName} is offline`);
       return;
     }
 
-    if (peerUser) {
-      socket.emit("call:end", {
-        to: peerUser._id,
-        from: authUser._id,
-      });
-    }
-
-    get().cleanupCall();
-    setTimeout(() => {
-      get().startCall(receiver, nextCallType);
-    }, 0);
+    socket.emit("group-call:invite", {
+      roomId,
+      from: authUser._id,
+      invitee: receiver,
+      participants,
+    });
+    toast.success(`Invited ${receiver.fullName}`);
   },
 
   toggleMute: () => {
@@ -257,80 +357,153 @@ export const useCallStore = create((set, get) => ({
     const { socket, authUser } = useAuthStore.getState();
     if (!socket || !authUser) return;
 
-    socket.off("call:offer");
-    socket.off("call:answer");
-    socket.off("call:ice-candidate");
-    socket.off("call:reject");
-    socket.off("call:busy");
-    socket.off("call:end");
-    socket.off("call:unavailable");
+    [
+      "group-call:created",
+      "group-call:invite",
+      "group-call:accepted",
+      "group-call:participant-joined",
+      "group-call:participant-left",
+      "group-call:offer",
+      "group-call:answer",
+      "group-call:ice-candidate",
+      "group-call:rejected",
+      "group-call:room-full",
+      "group-call:ended",
+      "call:unavailable",
+    ].forEach((event) => socket.off(event));
 
-    socket.on("call:offer", ({ from, caller, type, offer }) => {
+    socket.on("group-call:created", ({ participants }) => {
+      set({ participants: uniqueParticipants(participants || get().participants) });
+    });
+
+    socket.on("group-call:invite", ({ roomId, from, caller, type, participants }) => {
       const { callStatus } = get();
 
       if (callStatus !== "idle") {
-        socket.emit("call:busy", { to: from, from: authUser._id });
+        socket.emit("group-call:reject", { roomId, from: authUser._id, to: from });
         return;
       }
 
       set({
         callStatus: "ringing",
         callType: type,
+        roomId,
         peerUser: caller,
-        incomingOffer: offer,
+        incomingRoom: { roomId, from, caller, type, participants },
+        participants: uniqueParticipants(participants || [caller]),
       });
     });
 
-    socket.on("call:answer", async ({ answer }) => {
-      const { peerConnection } = get();
-      if (!peerConnection) return;
+    socket.on("group-call:accepted", ({ participants }) => {
+      set({
+        callStatus: "in-call",
+        participants: uniqueParticipants(participants || get().participants),
+      });
+    });
+
+    socket.on("group-call:participant-joined", async ({ participant, participants }) => {
+      set({
+        callStatus: "in-call",
+        participants: uniqueParticipants(participants || [...get().participants, participant]),
+      });
+
+      try {
+        await get().createOfferForParticipant(participant);
+      } catch (error) {
+        console.error("Failed to create group call offer:", error);
+      }
+    });
+
+    socket.on("group-call:participant-left", ({ participantId }) => {
+      get().removePeer(participantId);
+    });
+
+    socket.on("group-call:offer", async ({ roomId, from, offer }) => {
+      const { localStream } = get();
+      if (roomId !== get().roomId || !localStream) return;
+
+      try {
+        const peerConnection = get().createPeerConnection(from);
+        get().addLocalTracks(peerConnection, localStream);
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+        await get().flushIceCandidates(from);
+
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+
+        socket.emit("group-call:answer", {
+          roomId,
+          to: from,
+          from: authUser._id,
+          answer,
+        });
+
+        set({ callStatus: "in-call" });
+      } catch (error) {
+        console.error("Failed to answer group call offer:", error);
+      }
+    });
+
+    socket.on("group-call:answer", async ({ roomId, from, answer }) => {
+      const peerConnection = get().peerConnections[from];
+      if (roomId !== get().roomId || !peerConnection) return;
 
       await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-      await get().flushIceCandidates();
+      await get().flushIceCandidates(from);
       set({ callStatus: "in-call" });
     });
 
-    socket.on("call:ice-candidate", async ({ candidate }) => {
-      const { peerConnection, pendingIceCandidates } = get();
-      if (!candidate) return;
+    socket.on("group-call:ice-candidate", async ({ roomId, from, candidate }) => {
+      if (roomId !== get().roomId || !candidate) return;
 
+      const peerConnection = get().peerConnections[from];
       if (!peerConnection?.remoteDescription) {
-        set({ pendingIceCandidates: [...pendingIceCandidates, candidate] });
+        const pendingIceCandidates = get().pendingIceCandidates;
+        set({
+          pendingIceCandidates: {
+            ...pendingIceCandidates,
+            [from]: [...(pendingIceCandidates[from] || []), candidate],
+          },
+        });
         return;
       }
 
       await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     });
 
-    socket.on("call:reject", () => {
-      toast.error("Call rejected");
-      get().cleanupCall();
+    socket.on("group-call:rejected", ({ from }) => {
+      toast.error(`${from ? "A user" : "User"} rejected the call`);
     });
 
-    socket.on("call:busy", () => {
-      toast.error("User is busy on another call");
-      get().cleanupCall();
+    socket.on("group-call:room-full", () => {
+      toast.error("This group call is already full");
     });
 
-    socket.on("call:end", () => {
+    socket.on("group-call:ended", () => {
       toast("Call ended");
       get().cleanupCall();
     });
 
     socket.on("call:unavailable", () => {
       toast.error("User is not available for a call");
-      get().cleanupCall();
     });
   },
 
   unsubscribeFromCallEvents: () => {
     const { socket } = useAuthStore.getState();
-    socket?.off("call:offer");
-    socket?.off("call:answer");
-    socket?.off("call:ice-candidate");
-    socket?.off("call:reject");
-    socket?.off("call:busy");
-    socket?.off("call:end");
-    socket?.off("call:unavailable");
+    [
+      "group-call:created",
+      "group-call:invite",
+      "group-call:accepted",
+      "group-call:participant-joined",
+      "group-call:participant-left",
+      "group-call:offer",
+      "group-call:answer",
+      "group-call:ice-candidate",
+      "group-call:rejected",
+      "group-call:room-full",
+      "group-call:ended",
+      "call:unavailable",
+    ].forEach((event) => socket?.off(event));
   },
 }));
