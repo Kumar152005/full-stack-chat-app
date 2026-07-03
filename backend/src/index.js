@@ -6,6 +6,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 
 import { connectDB } from "./lib/db.js";
+import { initSentry, setupSentryErrorHandler } from "./lib/sentry.js";
 
 import authRoutes from "./routes/auth.route.js";
 import messageRoutes from "./routes/message.route.js";
@@ -22,6 +23,8 @@ const allowedOrigins = (process.env.CLIENT_URL || "http://localhost:5173")
   .split(",")
   .map((origin) => origin.trim());
 
+initSentry();
+
 app.use(express.json({ limit: "25mb" }));
 app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 app.use(cookieParser());
@@ -35,6 +38,7 @@ app.use(
 app.use("/api/auth", authRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/statuses", statusRoutes);
+setupSentryErrorHandler(app);
 
 if (process.env.NODE_ENV === "production") {
   app.use(express.static(frontendDistPath));
