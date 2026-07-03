@@ -101,35 +101,94 @@ export const getMessages = async(req,res) => {
     try {
         const { id: userToChatId } = req.params;
         const myId = req.user._id;
+        const limit = Math.min(Number(req.query.limit) || 30, 50);
+        const before = req.query.before ? new Date(req.query.before) : null;
 
-        const messages = await Message.find({
+        const query = {
             $or: [
                 { senderId: myId, receiverId: userToChatId },
                 { senderId: userToChatId, receiverId: myId },
             ],
-        }).sort({ createdAt: 1 });
+        };
 
-        res.status(200).json(messages);
+        if (before && !Number.isNaN(before.getTime())) {
+            query.createdAt = { $lt: before };
+        }
+
+        const messages = await Message.find(query)
+            .sort({ createdAt: -1 })
+            .limit(limit + 1);
+
+        const hasMore = messages.length > limit;
+        const page = (hasMore ? messages.slice(0, limit) : messages).reverse();
+
+        res.status(200).json({
+            messages: page,
+            hasMore,
+            nextCursor: page[0]?.createdAt || null,
+        });
     } catch (error) {
         console.log("Error in getMessages controller: ", error.message);
         res.status(500).json({ message: "Internal server error" });
     }
 };
 
+export const getUploadSignature = async (req, res) => {
+    try {
+        const timestamp = Math.round(Date.now() / 1000);
+        const folder = "kouventa/messages";
+
+        const signature = cloudinary.utils.api_sign_request(
+            { timestamp, folder },
+            process.env.CLOUDINARY_API_SECRET
+        );
+
+        res.status(200).json({
+            cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+            apiKey: process.env.CLOUDINARY_API_KEY,
+            folder,
+            timestamp,
+            signature,
+        });
+    } catch (error) {
+        console.log("Error in getUploadSignature controller: ", error.message);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+const isCloudinaryUrl = (url) =>
+    typeof url === "string" && /^https:\/\/res\.cloudinary\.com\//.test(url);
+
 export const sendMessage = async (req, res) => {
     try {
-        const { text, image, attachment, voice } = req.body;
+        const { text, image, attachment, uploadedImage, voice } = req.body;
         const { id: receiverId } =  req.params;
         const senderId =req.user._id;
 
         let imageUrl;
         let attachmentData;
+        if (uploadedImage?.url && isCloudinaryUrl(uploadedImage.url)) {
+            imageUrl = uploadedImage.url;
+            attachmentData = {
+                url: uploadedImage.url,
+                name: uploadedImage.name,
+                type: uploadedImage.type || "image/jpeg",
+                size: uploadedImage.size,
+            };
+        }
         if (image) {
             //upload base64 image to cloudinary
             const uploadResponse = await cloudinary.uploader.upload(image, { resource_type: "image" });
             imageUrl = getBrowserSafeImageUrl(uploadResponse);
         }
-        if (attachment?.data) {
+        if (attachment?.url && isCloudinaryUrl(attachment.url)) {
+            attachmentData = {
+                url: attachment.url,
+                name: attachment.name,
+                type: attachment.type,
+                size: attachment.size,
+            };
+        } else if (attachment?.data) {
             const uploadResponse = await cloudinary.uploader.upload(attachment.data, {
                 resource_type: "auto",
             });
