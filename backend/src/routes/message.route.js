@@ -4,6 +4,7 @@ import {
   addFriend,
   deleteMessageForEveryone,
   getMessages,
+  getUploadSignature,
   getUserForSidebar,
   markMessagesSeen,
   reactToMessage,
@@ -18,6 +19,7 @@ router.get("/users", protectRoute, getUserForSidebar );
 router.get("/users/search", protectRoute, searchUserByEmail);
 router.post("/users/:id/add", protectRoute, addFriend);
 router.post("/users/:id/pin", protectRoute, togglePinChat);
+router.get("/upload/signature", protectRoute, getUploadSignature);
 router.put("/:id/seen", protectRoute, markMessagesSeen);
 router.put("/:id/react", protectRoute, reactToMessage);
 router.delete("/:id", protectRoute, deleteMessageForEveryone);
