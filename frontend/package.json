@@ -1,13 +1,27 @@
 {
-  "name": "frontend",
+  "name": "kouventa-chat-app-frontend",
   "private": true,
   "version": "0.0.0",
+  "description": "Frontend for Kouventa Chat App - React + Vite with Sentry integration",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "lint:fix": "eslint . --fix",
+    "preview": "vite preview",
+    "check:audit": "npm audit --production"
+  },
+  "keywords": [
+    "chat",
+    "react",
+    "vite",
+    "socket.io",
+    "tailwindcss",
+    "sentry"
+  ],
+  "engines": {
+    "node": ">=20.19.0"
   },
   "dependencies": {
     "@sentry/react": "^10.63.0",
