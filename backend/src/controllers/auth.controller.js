@@ -1,4 +1,6 @@
 import { generateToken } from "../lib/utils.js";
+import Message from "../models/message.model.js";
+import Status from "../models/status.model.js";
 import User from "../models/user.model.js";
 import bcrypt from "bcryptjs";
 import cloudinary from "../lib/cloudinary.js";
@@ -114,6 +116,36 @@ export const updateProfile = async (req, res) => {
     res.status(200).json(updatedUser);
   } catch (error) {
     console.log("error in update profile:", error);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const deleteAccount = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    await Promise.all([
+      Message.deleteMany({
+        $or: [{ senderId: userId }, { receiverId: userId }],
+      }),
+      Status.deleteMany({ userId }),
+      User.updateMany(
+        {},
+        {
+          $pull: {
+            friends: userId,
+            pinnedChats: userId,
+          },
+        }
+      ),
+    ]);
+
+    await User.findByIdAndDelete(userId);
+
+    res.cookie("jwt", "", { maxAge: 0 });
+    res.status(200).json({ message: "Account deleted successfully" });
+  } catch (error) {
+    console.log("Error in deleteAccount controller:", error.message);
     res.status(500).json({ message: "Internal server error" });
   }
 };
